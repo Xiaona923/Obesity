@@ -1,0 +1,1051 @@
+---
+title: ""
+author: ""
+date: ""
+output:
+  pdf_document: default
+  html_document: default
+
+---
+
+This R code is to generate the tables and plots for analyzing obesity paradox. 
+
+- Description analysis.
+- Evaluate the association between obesity status and CPC counts - linear regression.
+- Evaluate the association of obesity and CPC counts with cardiovascular outcomes - Cox model.
+
+
+```{r warning=FALSE, include=FALSE}
+#read in CHDWB data
+CHDWB <- read.csv("CHDWB PC_Obesity 1.2021.csv")
+
+```
+
+```{r warning=FALSE, include=FALSE}
+##############Table1############
+
+#calculate 25th, 50th, 75th for each variable in list1 (continuous variables)
+list1 <- c("age","BMI","eGFR","hsCRPmgL","I_HOMA2IR","I_HOMA2B","VO2MAX",
+           "BFP","AFP","GFP","wbc_count","CD34","CD133","CXCR4")
+summary_sta1 <- t(sapply(CHDWB[,list1], function(x){quantile(x,c(0.5,0.25,0.75),na.rm = T)}))#overall
+summary_sta1.1 <- t(sapply(CHDWB[CHDWB$Obese==0,list1], function(x){quantile(x,c(0.5,0.25,0.75),na.rm = T)}))#Non-obese
+summary_sta1.2 <- t(sapply(CHDWB[CHDWB$Obese==1,list1], function(x){quantile(x,c(0.5,0.25,0.75),na.rm = T)}))#Obese
+
+summary1 <- cbind(summary_sta1,summary_sta1.1,summary_sta1.2)
+summary1[c("AFP","GFP"),] <- summary1[c("AFP","GFP"),]*100
+summary1[c("CD34","CD133","CXCR4"),] <- summary1[c("CD34","CD133","CXCR4"),]*1000
+summary1 <- apply(summary1,2, function(x){sprintf("%.1f",x)})
+colnames(summary1) <- c(paste("Overall",c("median","25th","75th"),sep = "_"),
+                        paste("Non_obese",c("median","25th","75th"),sep = "_"),
+                        paste("Obese",c("median","25th","75th"),sep = "_"))
+rownames(summary1) <- list1
+summary1 <- as.data.frame(summary1)
+#Mann-Whitney U test 
+summary1$p_value <- sapply(list1,function(x){wilcox.test(CHDWB[,x][CHDWB$Obese==1],CHDWB[,x][CHDWB$Obese==0])$p.value})
+
+
+#calculate number and percentile for variables in list2 (categorical variables)
+list2 <- c("male","Black","DM","HTN","curr_smoker","HC")
+summary_sta2 <- data.frame(num=sapply(CHDWB[,list2], function(x){sum(x,na.rm = T)}))#overall
+summary_sta2$perc <- round(summary_sta2*100/nrow(CHDWB),1)
+summary_sta2.1 <- data.frame(num=sapply(CHDWB[CHDWB$Obese==0,list2], function(x){sum(x,na.rm = T)})) #Non-obese
+summary_sta2.1$perc <- round(summary_sta2.1*100/nrow(CHDWB[CHDWB$Obese==0,]),1)
+summary_sta2.2 <- data.frame(num=sapply(CHDWB[CHDWB$Obese==1,list2], function(x){sum(x,na.rm = T)})) #Obese
+summary_sta2.2$perc <- round(summary_sta2.2*100/nrow(CHDWB[CHDWB$Obese==1,]),1)
+
+summary2 <- cbind(summary_sta2,summary_sta2.1,summary_sta2.2)
+colnames(summary2) <- c(paste("Overall",c("num","perc"),sep = "_"),
+                        paste("Non_obese",c("num","perc"),sep = "_"),
+                        paste("Obese",c("num","perc"),sep = "_"))
+
+#chi-square test
+summary2$p_value <- sapply(list2,function(x){chisq.test(table(CHDWB[,x],CHDWB$Obese))$p.value})
+
+```
+
+```{r warning=FALSE, include=FALSE}
+#format table1 data set
+summary1$Overall <- paste0(summary1$Overall_median," [",summary1$Overall_25th,", ",summary1$Overall_75th,"]")
+summary1$Non_obese <- paste0(summary1$Non_obese_median," [",summary1$Non_obese_25th,", ",summary1$Non_obese_75th,"]")
+summary1$Obese <- paste0(summary1$Obese_median," [",summary1$Obese_25th,", ",summary1$Obese_75th,"]")
+summary1 <- summary1[,c(11:13,10)]
+summary1$p_value <- sprintf("%.3f",summary1$p_value)
+summary1$p_value <- gsub("0.000","<0.001",summary1$p_value)
+
+
+summary2$Overall <- paste0(summary2$Overall_num," (",summary2$Overall_perc$num,")")
+summary2$Non_obese <- paste0(summary2$Non_obese_num," (",summary2$Non_obese_perc$num,")")
+summary2$Obese <- paste0(summary2$Obese_num," (",summary2$Obese_perc$num,")")
+summary2 <- summary2[,c(8:10,7)]
+summary2$p_value <- sprintf("%.3f",summary2$p_value)
+summary2$p_value <- gsub("0.000","<0.001",summary2$p_value)
+
+
+summary_sta <- rbind(summary1,summary2)
+```
+
+
+```{r warning=FALSE, include=FALSE}
+##########table2############
+
+#univariate models
+uni_model_CD34 <- lm(log2(CD34+0.0001) ~ Obese,data = CHDWB)
+uni_model_CD133 <- lm(log2(CD133+0.0001) ~ Obese,data = CHDWB)
+uni_model_CXCR4 <- lm(log2(CXCR4+0.0001) ~ Obese,data = CHDWB)
+
+#estimated difference for Obese
+CD34 <- as.matrix(((2^(cbind(uni_model_CD34$coefficients[2],confint(uni_model_CD34)))-1)*100)[2,])
+CD34 <- t(rbind(CD34,  summary(uni_model_CD34)$coefficient[2,4]))
+CD133 <- as.matrix(((2^(cbind(uni_model_CD133$coefficients[2],confint(uni_model_CD133)))-1)*100)[2,])
+CD133 <- t(rbind(CD133,  summary(uni_model_CD133)$coefficient[2,4]))
+CXCR4 <- as.matrix(((2^(cbind(uni_model_CXCR4$coefficients[2],confint(uni_model_CXCR4)))-1)*100)[2,])
+CXCR4 <- t(rbind(CXCR4,  summary(uni_model_CXCR4)$coefficient[2,4]))
+
+#format data set
+Uni_model <- as.data.frame(cbind(CD34,CD133,CXCR4))
+colnames(Uni_model) <- c(paste("CD34",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CD133",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CXCR4",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"))
+rownames(Uni_model) <- "univariate_Obese"
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#clinical models
+cli_model_CD34 <- lm(log2(CD34+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +wbc_count,data = CHDWB)
+cli_model_CD133 <- lm(log2(CD133+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +wbc_count,data = CHDWB)
+cli_model_CXCR4 <- lm(log2(CXCR4+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +wbc_count,data = CHDWB)
+CD34 <- NULL
+CD133 <- NULL
+CXCR4 <-NULL
+
+#estimated difference for Obese
+CD34 <- as.matrix(((2^(cbind(cli_model_CD34$coefficients[2],confint(cli_model_CD34)))-1)*100)[2,])
+CD34 <- t(rbind(CD34,  summary(cli_model_CD34)$coefficient[2,4]))
+CD133 <- as.matrix(((2^(cbind(cli_model_CD133$coefficients[2],confint(cli_model_CD133)))-1)*100)[2,])
+CD133 <- t(rbind(CD133,  summary(cli_model_CD133)$coefficient[2,4]))
+CXCR4 <- as.matrix(((2^(cbind(cli_model_CXCR4$coefficients[2],confint(cli_model_CXCR4)))-1)*100)[2,])
+CXCR4 <- t(rbind(CXCR4,  summary(cli_model_CXCR4)$coefficient[2,4]))
+
+#format data set
+clinical_model <- as.data.frame(cbind(CD34,CD133,CXCR4))
+colnames(clinical_model) <- c(paste("CD34",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CD133",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CXCR4",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"))
+rownames(clinical_model) <- "clinical_Obese"
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#calculate z score
+CHDWB$Z_Ln_HsCRP <- (CHDWB$Ln_hsCRP-mean(CHDWB$Ln_hsCRP,na.rm = T))/sd(CHDWB$Ln_hsCRP,na.rm = T)
+CHDWB$Z_Ln_IHOMA2IR <- (CHDWB$Ln_IHOMA2IR-mean(CHDWB$Ln_IHOMA2IR,na.rm = T))/sd(CHDWB$Ln_IHOMA2IR,na.rm = T)
+CHDWB$Z_Ln_IHOMA2B <- (CHDWB$Ln_IHOMA2B-mean(CHDWB$Ln_IHOMA2B,na.rm = T))/sd(CHDWB$Ln_IHOMA2B,na.rm = T)
+
+CHDWB$Z_Vo2 <- (CHDWB$VO2MAX-mean(CHDWB$VO2MAX,na.rm = T))/sd(CHDWB$VO2MAX,na.rm = T)
+CHDWB$Z_AFP <- (CHDWB$AFP-mean(CHDWB$AFP,na.rm = T))/sd(CHDWB$AFP,na.rm = T)
+CHDWB$Z_GFP <- (CHDWB$GFP-mean(CHDWB$GFP,na.rm = T))/sd(CHDWB$GFP,na.rm = T)
+CHDWB$Z_AFP2 <- (CHDWB$AFP2-mean(CHDWB$AFP2,na.rm = T))/sd(CHDWB$AFP2,na.rm = T)
+CHDWB$Z_GFP2 <- (CHDWB$GFP2-mean(CHDWB$GFP2,na.rm = T))/sd(CHDWB$GFP2,na.rm = T)
+
+
+#unique variable in each model
+vars <- c("Z_Ln_HsCRP","Z_Ln_IHOMA2IR", "Z_Ln_IHOMA2B","Z_Vo2",
+          "Z_GFP" ,"Z_AFP","Z_AFP2" ,"Z_GFP2",  "Lean_pct")
+
+
+tab2_dat <-NULL
+for( var_i in vars){
+    #models
+    model_CD34 <- lm(log2(CD34+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                             factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +wbc_count +  CHDWB[,var_i],data = CHDWB)
+    model_CD133 <- lm(log2(CD133+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                             factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +wbc_count +  CHDWB[,var_i],data = CHDWB)
+    model_CXCR4 <- lm(log2(CXCR4 +0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                             factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +wbc_count +  CHDWB[,var_i],data = CHDWB)
+    
+    #estimated difference
+    CD34 <- NULL
+    CD133 <- NULL
+    CXCR4 <-NULL
+    
+    CD34 <- as.matrix(((2^(cbind(model_CD34$coefficients[2],confint(model_CD34)))-1)*100)[2,])
+    CD34 <- cbind(CD34, ((2^(cbind(model_CD34$coefficients[12],confint(model_CD34)))-1)*100)[12,])
+    CD34 <- t(rbind(CD34,  summary(model_CD34)$coefficient[c(2,12),4]))
+    
+    CD133  <- as.matrix(((2^(cbind(model_CD133$coefficients[2],confint(model_CD133)))-1)*100)[2,])
+    CD133  <- cbind(CD133 , ((2^(cbind(model_CD133$coefficients[12],confint(model_CD133)))-1)*100)[12,])
+    CD133  <- t(rbind(CD133 ,  summary(model_CD133)$coefficient[c(2,12),4]))
+    
+    CXCR4 <- as.matrix(((2^(cbind(model_CXCR4$coefficients[2],confint(model_CXCR4)))-1)*100)[2,])
+    CXCR4 <- cbind(CXCR4, ((2^(cbind(model_CXCR4$coefficients[12],confint(model_CXCR4)))-1)*100)[12,])
+    CXCR4 <- t(rbind(CXCR4,  summary(model_CXCR4)$coefficient[c(2,12),4]))
+    
+    #format table
+    model <- cbind(CD34,CD133,CXCR4)
+    colnames(model) <- c(paste("CD34",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                             paste("CD133",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                             paste("CXCR4",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"))
+    rownames(model) <- c("Obese",var_i)
+
+tab2_dat <- rbind(tab2_dat,model)
+}
+
+#format data for table2
+tab2_dat <- rbind(Uni_model,clinical_model,tab2_dat)
+tab2_dat[,-c(4,8,12)] <- sapply(tab2_dat[,-c(4,8,12)], function(x){sprintf("%.1f",x)})
+tab2_dat[,c(4,8,12)] <- sapply(tab2_dat[,c(4,8,12)], function(x){sprintf("%.3f",as.numeric(x))})
+tab2_dat[,c(4,8,12)] <- sapply(tab2_dat[,c(4,8,12)],function(x){gsub("0.000","<0.001",x)})
+
+row.names(tab2_dat) <- c("Univariate","Clinical Model",'model1_Obese',"HsCRP","model2_Obese",
+                        "HOMA2IR","model3_Obese","HOMA2",
+                         "model4_Obese","VO2","model5_Obese","GFP","model6_Obese",
+                        "AFP","model7_Obese","AFP2","model8_Obese","GFP2","model9_Obese","Lean_pct")
+```
+
+
+```{r warning=FALSE, include=FALSE}
+##################table3###################
+library(survival)
+#read in ECB data
+ECB <- read.csv("ECB PC_Obesity 1.2021.csv")
+
+#univariate cox model
+uni_CDV<- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese),data=ECB, ties = "breslow")
+uni_overall<- coxph(Surv(timetodeath,death)~factor(Obese),data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- as.matrix(c(summary(uni_CDV)$conf.int[,-2],summary(uni_CDV)$coefficient[1,5]))
+overall <- as.matrix(c(summary(uni_overall)$conf.int[,-2],summary(uni_overall)$coefficient[1,5]))
+
+#format table
+uni_cox <- t(rbind(CVD,overall))
+colnames(uni_cox) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(uni_cox) <- "Univariate_Obese"
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#clinical model
+clinical_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),data=ECB, ties = "breslow")
+
+clinical_all <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+
+CVD <- as.matrix(c(summary(clinical_CVD)$conf.int[1,-2],summary(clinical_CVD)$coefficient[1,5]))
+overall <- as.matrix(c(summary(clinical_all)$conf.int[1,-2],summary(clinical_all)$coefficient[1,5]))
+
+#format table
+clinical <- t(rbind(CVD,overall))
+colnames(clinical) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(clinical) <- "clinical_Obese"
+
+```
+
+
+```{r warning=FALSE, include=FALSE}
+
+vars2 <- c("Log0.5_CD34","Log0.5_CD133","Log0.5_CXCR4")
+tab3_dat <- NULL
+for(var_i in vars2){
+    #models
+    cox_model_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+  factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+ECB[,var_i],
+                              data=ECB, ties = "breslow")
+    
+    
+    cox_model_overall <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+ factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+ECB[,var_i],
+                              data=ECB, ties = "breslow")
+    
+    #hazard ratio, 95%CI, p-value
+    CVD <- NULL
+    overall <- NULL
+    
+    CVD <- cbind(summary(cox_model_CVD)$conf.int[c(1,13),-2],summary(cox_model_CVD)$coefficient[c(1,13),5])
+    overall <- cbind(summary(cox_model_overall)$conf.int[c(1,13),-2],summary(cox_model_overall)$coefficient[c(1,13),5])
+    
+    
+    cox_model <- cbind(CVD,overall)
+    colnames(cox_model) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                           paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+    rownames(cox_model) <- c("Obese",var_i)
+    tab3_dat <- rbind(tab3_dat,cox_model)
+}
+
+tab3_dat <- rbind(uni_cox,clinical,tab3_dat)
+tab3_dat[,c(1:8)] <- sapply(tab3_dat[,c(1:8)] , function(x){sprintf("%.3f",x)})
+tab3_dat[,c(4,8)] <- sapply(tab3_dat[,c(4,8)],function(x){gsub("0.000","<0.001",x)})
+
+
+```
+
+
+
+
+```{r warning=FALSE, include=FALSE}
+###############table4#####################
+CVD_model1  <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(ECB_Obese4_CD34)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),
+                          data=ECB, ties = "breslow")
+overall_model1 <-  coxph(Surv(timetodeath,death)~factor(ECB_Obese4_CD34)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),
+                          data=ECB, ties = "breslow")
+
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+CVD <- cbind(summary(CVD_model1)$conf.int[3:1,-2],summary(CVD_model1)$coefficient[3:1,5])
+overall <- cbind(summary(overall_model1)$conf.int[3:1,-2],summary(overall_model1)$coefficient[3:1,5])
+
+model1 <- cbind(CVD,overall)
+
+
+```
+
+```{r warning=FALSE, include=FALSE}
+
+CVD_model2  <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(ECB_Obese4_CD133)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),
+                          data=ECB, ties = "breslow")
+
+overall_model2 <-  coxph(Surv(timetodeath,death)~factor(ECB_Obese4_CD133)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),
+                          data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+CVD <- cbind(summary(CVD_model2)$conf.int[3:1,-2],summary(CVD_model2)$coefficient[3:1,5])
+overall <- cbind(summary(overall_model2)$conf.int[3:1,-2],summary(overall_model2)$coefficient[3:1,5])
+
+model2 <- cbind(CVD,overall)
+```
+
+
+```{r warning=FALSE, include=FALSE}
+
+CVD_model3  <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(ECB_Obese4_CXCR4)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),
+                          data=ECB, ties = "breslow")
+overall_model3 <-  coxph(Surv(timetodeath,death)~factor(ECB_Obese4_CXCR4)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx),
+                          data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+CVD <- cbind(summary(CVD_model3)$conf.int[3:1,-2],summary(CVD_model3)$coefficient[3:1,5])
+overall <- cbind(summary(overall_model3)$conf.int[3:1,-2],summary(overall_model3)$coefficient[3:1,5])
+
+model3 <- cbind(CVD,overall)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#merge data into one table
+tab4_dat <- rbind(model1,model2,model3)
+tab4_dat[,c(1:8)] <- sapply(tab4_dat[,c(1:8)] , function(x){sprintf("%.3f",x)})
+tab4_dat[,c(4,8)] <- sapply(tab4_dat[,c(4,8)],function(x){gsub("0.000","<0.001",x)})
+
+rownames(tab4_dat) <- c("Obese and High CD34+","Obese and Low CD34+",
+                        "Non-Obese and High CD34+",
+                        "Obese and High CD34+/CD133+","Obese and Low CD34+/CD133+",
+                        "Non-Obese and High CD34+/CD133+",
+                        "Obese and High CD34+/CXCR4+","Obese and Low CD34+/CXCR4+",
+                        "Non-Obese and High CD34+/CXCR4+")
+
+```
+
+
+
+```{r warning=FALSE, include=FALSE}
+########### check interactions for table2
+##########table2############
+
+#univariate models interaction with sex
+uni_model_CD34 <- lm(log2(CD34+0.0001) ~ factor(Obese)+factor(male)+factor(Obese)*factor(male),
+                     data = CHDWB)
+uni_model_CD133 <- lm(log2(CD133+0.0001) ~ factor(Obese)+factor(male)+factor(Obese)*factor(male),
+                      data = CHDWB)
+uni_model_CXCR4 <- lm(log2(CXCR4+0.0001) ~ factor(Obese)+factor(male)+factor(Obese)*factor(male),
+                      data = CHDWB)
+
+summary(uni_model_CD34)
+summary(uni_model_CD133)
+summary(uni_model_CXCR4)
+
+CD34 <- NULL
+CD133 <- NULL
+CXCR4 <-NULL
+
+#estimated difference for Obese
+CD34 <- as.matrix(((2^(cbind(uni_model_CD34$coefficients,confint(uni_model_CD34)))-1)*100)[c(2,4),])
+CD34 <- cbind(CD34,  summary(uni_model_CD34)$coefficient[c(2,4),4])
+CD133 <- as.matrix(((2^(cbind(uni_model_CD133$coefficients,confint(uni_model_CD133)))-1)*100)[c(2,4),])
+CD133 <- cbind(CD133,  summary(uni_model_CD133)$coefficient[c(2,4),4])
+CXCR4 <- as.matrix(((2^(cbind(uni_model_CXCR4$coefficients,confint(uni_model_CXCR4)))-1)*100)[c(2,4),])
+CXCR4 <- cbind(CXCR4,  summary(uni_model_CXCR4)$coefficient[c(2,4),4])
+
+
+Uni_model_inter <- as.data.frame(cbind(CD34,CD133,CXCR4))
+colnames(Uni_model_inter) <- c(paste("CD34",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CD133",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CXCR4",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"))
+rownames(Uni_model_inter) <- c("Univariate_Obese","Obese * Male")
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#clinical models interaction with sex
+cli_model_CD34 <- lm(log2(CD34+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +wbc_count+Obese*factor(male),data = CHDWB)
+cli_model_CD133 <- lm(log2(CD133+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +wbc_count+Obese*factor(male),data = CHDWB)
+cli_model_CXCR4 <- lm(log2(CXCR4+0.0001) ~ Obese + age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +wbc_count+Obese*factor(male),data = CHDWB)
+
+summary(cli_model_CD34)
+summary(cli_model_CD133)
+summary(cli_model_CXCR4)
+
+CD34 <- NULL
+CD133 <- NULL
+CXCR4 <-NULL
+
+#estimated difference for Obese
+CD34 <- as.matrix(((2^(cbind(cli_model_CD34$coefficients,confint(cli_model_CD34)))-1)*100)[c(2,12),])
+CD34 <- cbind(CD34,  summary(cli_model_CD34)$coefficient[c(2,12),4])
+CD133 <- as.matrix(((2^(cbind(cli_model_CD133$coefficients,confint(cli_model_CD133)))-1)*100)[c(2,12),])
+CD133 <- cbind(CD133,  summary(cli_model_CD133)$coefficient[c(2,12),4])
+CXCR4 <- as.matrix(((2^(cbind(cli_model_CXCR4$coefficients,confint(cli_model_CXCR4)))-1)*100)[c(2,12),])
+CXCR4 <- cbind(CXCR4,  summary(cli_model_CXCR4)$coefficient[c(2,12),4])
+
+
+clinical_model_inter <- as.data.frame(cbind(CD34,CD133,CXCR4))
+
+colnames(clinical_model_inter) <- c(paste("CD34",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CD133",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"),
+                         paste("CXCR4",c("estimated_difference","2.5%CI","97.5%CI","P_value"),sep = "_"))
+rownames(clinical_model_inter) <- c("Clinical_Obese","Obese * Male")
+```
+
+
+
+```{r warning=FALSE, include=FALSE}
+############ check interactions for table3
+
+###################interaction between sex and obese###################
+#univariate cox model
+uni_CDV<- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+factor(male)+factor(Obese)*factor(male),data=ECB, ties = "breslow")
+uni_overall<- coxph(Surv(timetodeath,death)~factor(Obese)+factor(male)+factor(Obese)*factor(male),data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+
+CVD <- as.matrix(cbind(summary(uni_CDV)$conf.int[c(1,3),-2],summary(uni_CDV)$coefficient[c(1,3),5]))
+overall <- as.matrix(cbind(summary(uni_overall)$conf.int[c(1,3),-2],summary(uni_overall)$coefficient[c(1,3),5]))
+
+uni_cox_inter <-cbind(CVD,overall)
+colnames(uni_cox_inter) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(uni_cox_inter) <- c("Univariate_Obese","Obese * male")
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#clinical model interaction with sex
+clinical_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+factor(Obese)*factor(male),data=ECB, ties = "breslow")
+
+clinical_all <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+factor(Obese)*factor(male),data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+
+CVD <- cbind(summary(clinical_CVD)$conf.int[c(1,13),-2],summary(clinical_CVD)$coefficient[c(1,13),5])
+overall <- cbind(summary(clinical_all)$conf.int[c(1,13),-2],summary(clinical_all)$coefficient[c(1,13),5])
+
+clinical_inter <- cbind(CVD,overall)
+colnames(clinical_inter) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(clinical_inter) <- c("Clinical_Obese","Obese * male")
+
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#model1-3 interaction between obese and sex
+vars2 <- c("Log0.5_CD34","Log0.5_CD133","Log0.5_CXCR4")
+tab3_inter1 <- NULL
+for(var_i in vars2){
+    
+    cox_model_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+  factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+ECB[,var_i]+
+                              factor(Obese)* factor(male),
+                              data=ECB, ties = "breslow")
+    
+    
+    cox_model_overall <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+ factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+ECB[,var_i]+
+                              factor(Obese)* factor(male),
+                              data=ECB, ties = "breslow")
+    
+    #hazard ratio, 95%CI, p-value
+    CVD <- NULL
+    overall <- NULL
+    
+    CVD <- cbind(summary(cox_model_CVD)$conf.int[c(1,13,14),-2],summary(cox_model_CVD)$coefficient[c(1,13,14),5])
+    overall <- cbind(summary(cox_model_overall)$conf.int[c(1,13,14),-2],summary(cox_model_overall)$coefficient[c(1,13,14),5])
+    
+    
+    cox_model <- cbind(CVD,overall)
+    colnames(cox_model) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                           paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+    rownames(cox_model) <- c("Obese",var_i,"Obese*male")
+    tab3_inter1 <- rbind(tab3_inter1,cox_model)
+}
+
+tab3_inter1 <- rbind(uni_cox_inter,clinical_inter,tab3_inter1)
+
+
+```
+
+
+
+```{r warning=FALSE, include=FALSE}
+###################interaction between sex and CPC###################
+
+#model1 interaction between sex and CPC
+cox_model1_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD34+Log0.5_CD34*factor(male), data=ECB, ties = "breslow")
+
+
+cox_model1_overall <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD34+Log0.5_CD34*factor(male), data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+
+CVD <- cbind(summary(cox_model1_CVD)$conf.int[c(1,13,14),-2],summary(cox_model1_CVD)$coefficient[c(1,13,14),5])
+overall <- cbind(summary(cox_model1_overall)$conf.int[c(1,13,14),-2],summary(cox_model1_overall)$coefficient[c(1,13,14),5])
+
+
+cox_model1_inter2 <- cbind(CVD,overall)
+colnames(cox_model1_inter2) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(cox_model1_inter2) <- c("Obese","CD34","CD34 * male")
+
+```
+
+
+```{r warning=FALSE, include=FALSE}
+#model2 interaction between sex and CPC
+cox_model2_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD133+Log0.5_CD133*factor(male),data=ECB, ties = "breslow")
+
+cox_model2_overall <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD133+Log0.5_CD133*factor(male), data=ECB, ties = "breslow")
+
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+
+CVD <- cbind(summary(cox_model2_CVD)$conf.int[c(1,13,14),-2],summary(cox_model2_CVD)$coefficient[c(1,13,14),5])
+overall <- cbind(summary(cox_model2_overall)$conf.int[c(1,13,14),-2],summary(cox_model2_overall)$coefficient[c(1,13,14),5])
+
+cox_model2_inter2 <- cbind(CVD,overall)
+colnames(cox_model2_inter2) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(cox_model2_inter2) <- c("Obese","CD133","CD133 * male")
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+#model3 interaction between sex and CPC
+cox_model3_CVD <- coxph(Surv(timetoCVD_MI,CVD_MI)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CXCR4+Log0.5_CXCR4*factor(male),data=ECB, ties = "breslow")
+
+cox_model3_overall <- coxph(Surv(timetodeath,death)~factor(Obese)+age + factor(male) + factor(Black)+
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                         +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CXCR4+Log0.5_CXCR4*factor(male),data=ECB, ties = "breslow")
+
+#hazard ratio, 95%CI, p-value
+CVD <- NULL
+overall <- NULL
+
+CVD <- cbind(summary(cox_model3_CVD)$conf.int[c(1,13,14),-2],summary(cox_model3_CVD)$coefficient[c(1,13,14),5])
+overall <- cbind(summary(cox_model3_overall)$conf.int[c(1,13,14),-2],summary(cox_model3_overall)$coefficient[c(1,13,14),5])
+
+
+cox_model3_inter2 <- cbind(CVD,overall)
+colnames(cox_model3_inter2) <- c(paste("CVD",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"),
+                       paste("overall",c("HR","2.5%CI","97.5%CI","p_value"),sep = "_"))
+rownames(cox_model3_inter2) <- c("Obese","CXCR44","CXCR44 * male")
+
+```
+
+
+```{r echo=FALSE, warning=FALSE}
+#format tables 
+#results of checking interactions
+tab2_inter <- rbind(Uni_model_inter,clinical_model_inter)
+
+tab3_inter2 <- rbind(cox_model1_inter2,cox_model2_inter2,cox_model3_inter2)
+
+tab2_inter[,-c(4,8,12)] <- sapply(tab2_inter[,-c(4,8,12)], function(x){sprintf("%.1f",x)})
+tab2_inter[,c(4,8,12)] <- sapply(tab2_inter[,c(4,8,12)], function(x){sprintf("%.3f",x)})
+tab2_inter[,c(4,8,12)] <- sapply(tab2_inter[,c(4,8,12)],function(x){gsub("0.000","<0.001",x)})
+
+tab3_inter1[,c(1:8)] <- sapply(tab3_inter1[,c(1:8)] , function(x){sprintf("%.3f",x)})
+tab3_inter1[,c(4,8)] <- sapply(tab3_inter1[,c(4,8)],function(x){gsub("0.000","<0.001",x)})
+
+tab3_inter2[,c(1:8)] <- sapply(tab3_inter2[,c(1:8)] , function(x){sprintf("%.3f",x)})
+tab3_inter2[,c(4,8)] <- sapply(tab3_inter2[,c(4,8)],function(x){gsub("0.000","<0.001",x)})
+
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+######output tables
+library(knitr)
+library(kableExtra)
+
+##table1
+kable(summary_sta,"latex", booktabs = T,align = 'r',
+      caption = "Baseline characteristics of CHDWB participants stratified by obesity status") %>%
+  kable_styling(latex_options = "hold_position")
+
+#table2
+kable(tab2_dat,"latex", booktabs = T,align = 'r',
+      caption = "Association of obesity with circulating progenitor cells counts in CHDWB cohort",
+      col.names = c(rep(c("Estimated difference","2.5%CI","97.5%CI","p-value"),3)))%>%
+    landscape()%>%
+    column_spec(2:13, width = "4em")%>%
+    add_header_above(c("","CD34" =4,"CD133"=4,"CXCR4"=4)) %>%
+    pack_rows("model1",3,4) %>%
+    pack_rows("model2",5,6) %>%
+    pack_rows("model3",7,8) %>%
+    pack_rows("model4",9,10) %>%
+    pack_rows("model5",11,12) %>%
+    pack_rows("model6",13,14)  %>%
+    pack_rows("model7",15,16) %>%
+    pack_rows("model8",17,18) %>%
+    pack_rows("model9",19,20) %>%
+    add_footnote(c("Z-scores were created for VO2, AFP, AFP2, GFP and GFP2"))
+
+
+#table3
+kable(tab3_dat,"latex", booktabs = T,align = 'r',
+      caption = "Association of obesity and CPC counts with cardiovascular outcomes in EmCAB cohort",
+      col.names = c(rep(c("HR","2.5%CI","97.5%CI","p-value"),2)))%>%
+    landscape() %>%
+    column_spec(2:9, width = "5em")%>%
+    add_header_above(c("","Cardiovascular Death/MI" =4,"All-Cause Death"=4)) %>%
+    pack_rows("model1",3,4) %>%
+    pack_rows("model2",5,6) %>%
+    pack_rows("model3",7,8)  
+
+
+
+#table4
+kable(tab4_dat,"latex", booktabs = T,align = 'r',
+      caption = "Cardiovascular outcomes in EmCAB cohort participants stratified by Obesity and CPC counts",
+      col.names = c(rep(c("HR","2.5%CI","97.5%CI","p-value"),2)))%>%
+    landscape() %>%
+    column_spec(2:9, width = "5em")%>%
+    add_header_above(c("","Cardiovascular Death/MI" =4,"All-Cause Death"=4)) %>%
+    collapse_rows(1, latex_hline = "none") %>%
+    pack_rows("CD34",1,3) %>%
+    pack_rows("CD133",4,6) %>%
+    pack_rows("CXCR4",7,9)
+
+
+#table2 interaction
+kable(tab2_inter,"latex", booktabs = T,align = 'r',
+      caption = "Association of obesity with circulating progenitor cells counts in CHDWB cohort (interaction between obese and sex)",
+      col.names = c(rep(c("Estimated difference","2.5%CI","97.5%CI","p-value"),3))) %>%
+    landscape()%>%
+    column_spec(2:13, width = "4em")%>%
+    add_header_above(c("","CD34" =4,"CD133"=4,"CXCR4"=4)) %>%
+    pack_rows("Univariate",1,2) %>%
+    pack_rows("Clinical",3,4) 
+
+
+#table3 interaction with sex 
+kable(tab3_inter1,"latex", booktabs = T,align = 'r',
+      caption = "Association of obesity and CPC counts with cardiovascular outcomes in EmCAB cohort (interaction between obese and sex)",
+      col.names = c(rep(c("HR","2.5%CI","97.5%CI","p-value"),2)))%>%
+    landscape() %>%
+    column_spec(2:9, width = "5em")%>%
+    add_header_above(c("","Cardiovascular Death/MI" =4,"All-Cause Death"=4)) %>%
+    pack_rows("Univariate",1,2) %>%
+    pack_rows("Clinical",3,4) %>%
+    pack_rows("model1",5,7) %>%
+    pack_rows("model2",8,10) %>%
+    pack_rows("model3",11,13)  
+
+#table3 interaction between CPC with sex 
+kable(tab3_inter2,"latex", booktabs = T,align = 'r',
+      caption = "Association of obesity and CPC counts with cardiovascular outcomes in EmCAB cohort (interaction between CPC and sex)",
+      col.names = c(rep(c("HR","2.5%CI","97.5%CI","p-value"),2)))%>%
+    landscape() %>%
+    column_spec(2:9, width = "5em")%>%
+    add_header_above(c("","Cardiovascular Death/MI" =4,"All-Cause Death"=4)) %>%
+    pack_rows("model1",1,3) %>%
+    pack_rows("model2",4,6) %>%
+    pack_rows("model3",7,9) 
+
+
+```
+
+\newpage
+
+### partial plots using ECB data set
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(colorspace)
+#partial plot for CD34
+CD34_reidual <- lm(BMI~ age + factor(male) + factor(Black)
+            +factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)
+            +eGFR+factor(CABGhx)+factor(PVDhx)+factor(HFhx),data = ECB)
+
+CD34_reidual1 <- lm(Log2CD34 ~ age + factor(male) + factor(Black)
+            +factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)
+            +eGFR+factor(CABGhx)+factor(PVDhx)+factor(HFhx),data = ECB)
+
+
+#stratify BMI using decile
+cat_resi <-NULL
+cat_resi[CD34_reidual$residuals < -6.89] <- 0
+cat_resi[CD34_reidual$residuals >= -6.89 & CD34_reidual$residuals < -4.87 ] <- 1
+cat_resi[CD34_reidual$residuals >= -4.87 & CD34_reidual$residuals < -3.22] <- 2
+cat_resi[CD34_reidual$residuals >= -3.22 & CD34_reidual$residuals  < -1.88] <- 3
+cat_resi[CD34_reidual$residuals >= -1.88 & CD34_reidual$residuals < -0.56] <- 4
+cat_resi[CD34_reidual$residuals >= -0.56 & CD34_reidual$residuals < 0.79] <- 5
+cat_resi[CD34_reidual$residuals >= 0.79 & CD34_reidual$residuals < 2.44] <- 6
+cat_resi[CD34_reidual$residuals >= 2.44 & CD34_reidual$residuals < 4.20] <- 7
+cat_resi[CD34_reidual$residuals >= 4.20 & CD34_reidual$residuals < 6.93] <- 8
+cat_resi[CD34_reidual$residuals>=6.93] <- 9
+
+my_dat <- data.frame(bmi_res =cat_resi, cpc_resi=  CD34_reidual1$residuals)
+
+#partial plot BMI vs CD34
+ggplot(my_dat, aes(x=factor(bmi_res), y=cpc_resi)) + 
+  geom_boxplot(lwd=0.9, aes(color = factor(cat_resi)), outlier.alpha = 0)+
+  geom_jitter(color="dark grey", size=0.4, alpha=0.9) +
+  scale_color_manual("BMI residual categories (n)",values = rainbow_hcl(10),
+                      labels=c("< -6.89 (128)", "-6.89, -4.87 (127)", "-4.87, -3.22 (127)","-3.22, -1.88 (128)", "-1.88, -0.56 (127)","-0.56, 0.79 (126)","0.79, 2.44 (128)","2.44, 4.20 (126)","4.20, 6.93 (129)",">= 6.93 (127)"))+
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  xlab("BMI residual categories")+  ylab("CD34 residuals")+
+  ylim(-4, 4)
+
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#partial plot BMI vs CD133
+
+CD133_reidual1 <- lm(Log2CD133 ~ age + factor(male) + factor(Black)
+            +factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)
+            +eGFR+factor(CABGhx)+factor(PVDhx)+factor(HFhx),data = ECB)
+
+
+my_dat <- data.frame(bmi_res =cat_resi, cpc_resi=  CD133_reidual1$residuals)
+
+
+ggplot(my_dat, aes(x=factor(bmi_res), y=cpc_resi)) + 
+  geom_boxplot(lwd=0.9, aes(color = factor(cat_resi)), outlier.alpha = 0)+
+  geom_jitter(color="dark grey", size=0.4, alpha=0.9) +
+  scale_color_manual("BMI residual categories (n)",values = rainbow_hcl(10),
+                      labels=c("< -6.89 (128)", "-6.89, -4.87 (127)", "-4.87, -3.22 (127)","-3.22, -1.88 (128)", "-1.88, -0.56 (127)","-0.56, 0.79 (126)","0.79, 2.44 (128)","2.44, 4.20 (126)","4.20, 6.93 (129)",">= 6.93 (127)"))+
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  xlab("BMI residual categories")+  ylab("CD133 residuals")+
+  ylim(-4, 4)
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#partial plot BMI vs  CXCR4
+
+CXCR4_reidual1 <- lm(Log2CXCR4 ~ age + factor(male) + factor(Black)
+            +factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)
+            +eGFR+factor(CABGhx)+factor(PVDhx)+factor(HFhx),data = ECB)
+
+my_dat <- data.frame(bmi_res =cat_resi, cpc_resi=  CXCR4_reidual1$residuals)
+
+ggplot(my_dat, aes(x=factor(bmi_res), y=cpc_resi)) + 
+  geom_boxplot(lwd=0.9, aes(color = factor(cat_resi)), outlier.alpha = 0)+
+  geom_jitter(color="dark grey", size=0.4, alpha=0.9) +
+  scale_color_manual("BMI residual categories (n)",values = rainbow_hcl(10),
+                      labels=c("< -6.89 (128)", "-6.89, -4.87 (127)", "-4.87, -3.22 (127)","-3.22, -1.88 (128)", "-1.88, -0.56 (127)","-0.56, 0.79 (126)","0.79, 2.44 (128)","2.44, 4.20 (126)","4.20, 6.93 (129)",">= 6.93 (127)"))+
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  xlab("BMI residual categories")+  ylab("CXCR4 residuals")+
+  ylim(-4, 4)
+
+```
+
+
+
+
+### partial plots using CHDWB data set
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#partial plot BMI vs CD34
+CD34_reidual2 <- lm(BMI~ age + factor(male) + factor(Black)+
+                     factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                     +wbc_count,data = CHDWB)
+
+CD34_reidual3 <- lm(Log2CD34 ~ age + factor(male) + factor(Black)+
+                             factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +wbc_count,data = CHDWB)
+
+
+#stratify BMI using decile
+
+cat_resi <-NULL
+cat_resi[CD34_reidual2$residuals < -6.10] <- 0
+cat_resi[CD34_reidual2$residuals >= -6.10 & CD34_reidual2$residuals < -4.20 ] <- 1
+cat_resi[CD34_reidual2$residuals >= -4.20 & CD34_reidual2$residuals < -3.22] <- 2
+cat_resi[CD34_reidual2$residuals >= -3.22 & CD34_reidual2$residuals  < -1.94] <- 3
+cat_resi[CD34_reidual2$residuals >= -1.94 & CD34_reidual2$residuals < -0.80] <- 4
+cat_resi[CD34_reidual2$residuals >= -0.80 & CD34_reidual2$residuals < 0.46] <- 5
+cat_resi[CD34_reidual2$residuals >= 0.46 & CD34_reidual2$residuals < 1.94] <- 6
+cat_resi[CD34_reidual2$residuals >= 1.94 & CD34_reidual2$residuals < 3.58] <- 7
+cat_resi[CD34_reidual2$residuals >= 3.58 & CD34_reidual2$residuals < 6.51] <- 8
+cat_resi[CD34_reidual2$residuals>=6.51] <- 9
+
+my_dat <- data.frame(bmi_res =cat_resi, cpc_resi= CD34_reidual3$residuals)
+
+ggplot(my_dat, aes(x=factor(bmi_res), y=cpc_resi)) + 
+  geom_boxplot(lwd=0.9, aes(color = factor(cat_resi)), outlier.alpha = 0)+
+  geom_jitter(color="dark grey", size=0.4, alpha=0.9) +
+  scale_color_manual("BMI residual categories (n)",values = rainbow_hcl(10),
+                      labels=c("< -6.10 (67)", "-6.10, -4.20 (67)", "-4.20, -3.22 (67)","-3.22, -1.94 (67)", "-1.94, -0.80 (67)","-0.80, 0.46 (67)","0.46, 1.94 (66)","1.94, 3.58 (68)","3.58, 6.51 (67)",">= 6.51 (67)"))+
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  xlab("BMI residual categories")+  ylab("CD34 residuals")+
+  ylim(-4, 4)
+
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#partial plot BMI vs CD133
+
+CD133_reidual2 <- lm(Log2CD133 ~ age + factor(male) + factor(Black)+
+                     factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                     +wbc_count,data = CHDWB)
+
+
+my_dat <- data.frame(bmi_res =cat_resi, cpc_resi=  CD133_reidual2$residuals)
+ggplot(my_dat, aes(x=factor(bmi_res), y=cpc_resi)) + 
+  geom_boxplot(lwd=0.9, aes(color = factor(cat_resi)), outlier.alpha = 0)+
+  geom_jitter(color="dark grey", size=0.4, alpha=0.9) +
+  scale_color_manual("BMI residual categories (n)",values = rainbow_hcl(10),
+                      labels=c("< -6.10 (67)", "-6.10, -4.20 (67)", "-4.20, -3.22 (67)","-3.22, -1.94 (67)", "-1.94, -0.80 (67)","-0.80, 0.46 (67)","0.46, 1.94 (66)","1.94, 3.58 (68)","3.58, 6.51 (67)",">= 6.51 (67)"))+
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  xlab("BMI residual categories")+  ylab("CD133 residuals")+
+  ylim(-4, 4)
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#partial plot BMI vs CXCR4
+
+CXCR4_reidual2 <- lm(Log2CXCR4 ~ age + factor(male) + factor(Black)+
+                     factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                     +wbc_count,data = CHDWB)
+
+
+my_dat <- data.frame(bmi_res =cat_resi, cpc_resi=  CXCR4_reidual2$residuals)
+
+ggplot(my_dat, aes(x=factor(bmi_res), y=cpc_resi)) + 
+  geom_boxplot(lwd=0.9, aes(color = factor(cat_resi)), outlier.alpha = 0)+
+  geom_jitter(color="dark grey", size=0.4, alpha=0.9) +
+  scale_color_manual("BMI residual categories (n)",values = rainbow_hcl(10),
+                      labels=c("< -6.10 (67)", "-6.10, -4.20 (67)", "-4.20, -3.22 (67)","-3.22, -1.94 (67)", "-1.94, -0.80 (67)","-0.80, 0.46 (67)","0.46, 1.94 (66)","1.94, 3.58 (68)","3.58, 6.51 (67)",">= 6.51 (67)"))+
+  theme_bw() +
+  theme(panel.border = element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  xlab("BMI residual categories")+  ylab("CXCR4 residuals")+
+  ylim(-4, 4)
+
+```
+
+```{r include=FALSE}
+##comparing models using linear continuous BMI and categorical BMI for CHDWB data set
+CHDWB_cate_BMI <- NULL
+CHDWB_cate_BMI[CHDWB$BMI < 20] <- 0
+CHDWB_cate_BMI[CHDWB$BMI >= 20 & CHDWB$BMI <= 25] <- 1
+CHDWB_cate_BMI[CHDWB$BMI > 25 & CHDWB$BMI <= 30] <- 2
+CHDWB_cate_BMI[CHDWB$BMI > 30] <- 3
+
+CHDWB_cate_BMI <- factor(CHDWB_cate_BMI, levels = c(2,0,1,3))
+
+CPCs <- c('Log2CD34','Log2CD133',"Log2CXCR4")
+result <- NULL
+
+for (i in CPCs){
+  test1 <- lm(CHDWB[,i] ~ CHDWB_cate_BMI + age + factor(male) + factor(Black)+
+                     factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                     +wbc_count,data = CHDWB)
+  
+  test2 <- lm(CHDWB[,i] ~ BMI + age + factor(male) + factor(Black)+
+                     factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                     +wbc_count,data = CHDWB)
+  #comparing two models
+  temp <- c(anova(test1,test2)$`Pr(>F)`[2],AIC(test1),AIC(test2))
+  result <- rbind(result,temp)
+}
+
+rownames(result) <- CPCs
+colnames(result) <- c('p-value',"AIC (categorical BMI)","AIC (Linear continuous BMI)")
+
+
+
+###comparing models using linear continuous BMI and categorical BMI for ECB data set
+ECB_cate_BMI <- NULL
+ECB_cate_BMI[ECB$BMI < 20] <- 0
+ECB_cate_BMI[ECB$BMI >= 20 & ECB$BMI <= 25] <- 1
+ECB_cate_BMI[ECB$BMI > 25 & ECB$BMI <= 30] <- 2
+ECB_cate_BMI[ECB$BMI > 30] <- 3
+
+ECB_cate_BMI <- factor(ECB_cate_BMI, levels = c(3,0,1,2))
+
+result2 <- NULL
+for (i in CPCs){
+  test3 <- lm(ECB[,i] ~ ECB_cate_BMI + age + factor(male) + factor(Black)+factor(DM)+
+                factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                +factor(CABGhx)+factor(PVDhx)+factor(HFhx),data = ECB)
+  
+  test4 <- lm(ECB[,i] ~ BMI + age + factor(male) + factor(Black)+ factor(DM)+
+                factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                +factor(CABGhx)+factor(PVDhx)+factor(HFhx),data = ECB)
+  
+  #comparing two models
+  temp <- c(anova(test3,test4)$`Pr(>F)`[2],AIC(test3),AIC(test4))
+  result2 <- rbind(result2,temp)
+}
+
+rownames(result2) <- CPCs
+colnames(result2) <- c('p-value',"AIC (categorical BMI)","AIC (Linear continuous BMI)")
+
+result
+result2
+```
+
+
+```{r include=FALSE}
+#cox ph model 
+#CD34 timetoCVD_MI
+test5 <- coxph(Surv(timetoCVD_MI,CVD_MI)~ECB_cate_BMI+age + factor(male) + factor(Black)+ 
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD34,
+                              data=ECB, ties = "breslow") #categorical
+
+test6 <- coxph(Surv(timetoCVD_MI,CVD_MI)~BMI+age + factor(male) + factor(Black)+ 
+                         factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD34,
+                              data=ECB, ties = "breslow") #continuous
+    
+#cox ph model 
+#CD34 timetodeath 
+test7 <- coxph(Surv(timetodeath,death)~ECB_cate_BMI+age + factor(male) + factor(Black)+
+                             factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD34,
+                              data=ECB, ties = "breslow") #categorical
+
+test8 <- coxph(Surv(timetodeath,death)~BMI+age + factor(male) + factor(Black)+
+                             factor(DM)+ factor(HTN)+factor(HC)+factor(curr_smoker)+eGFR
+                             +factor(CABGhx)+factor(PVDhx)+factor(HFhx)+Log0.5_CD34,
+                              data=ECB, ties = "breslow") #continuous
+
+
+
+
+#hazard ratio, 95%CI, p-value
+CVD1 <- NULL
+CVD2 <- NULL
+
+overall1 <- NULL
+overall2 <- NULL
+
+CVD1 <- cbind(summary(test5)$conf.int[c(1:3,15),-2],summary(test5)$coefficient[c(1:3,15),5])#categorical BMI
+CVD2 <- cbind(summary(test6)$conf.int[c(1,13),-2],summary(test6)$coefficient[c(1,13),5])#continuous BMI
+
+overall1 <- cbind(summary(test7)$conf.int[c(1:3,15),-2],summary(test7)$coefficient[c(1:3,15),5])#categorical BMI
+overall2 <- cbind(summary(test8)$conf.int[c(1,13),-2],summary(test8)$coefficient[c(1,13),5])#continuous BMI
+
+CVD1
+CVD2
+
+overall1
+overall2
+
+```
+
+
+
+
+
+
